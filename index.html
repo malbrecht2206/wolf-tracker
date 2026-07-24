@@ -908,7 +908,7 @@ function playerRowsHTML(round){
     <div class="player-sub-row">
       <div class="player-sub-field">
         <label>Initials</label>
-        <input type="text" class="player-initials-input" data-pidx="${i}" maxlength="3" value="${escapeHTML(round.playerInitials ? round.playerInitials[i] : '')}" placeholder="${escapeHTML(initials(name))}">
+        <input type="text" class="player-initials-input" data-pidx="${i}" maxlength="3" value="${escapeHTML(displayInitials(round,i))}" placeholder="${escapeHTML(initials(name))}">
       </div>
       <div class="player-sub-field">
         <label>Start pts</label>
@@ -960,7 +960,7 @@ function renderCardView(round){
     const pts = result.ready ? result.points[i] : 0;
     return `
     <div class="score-row">
-      <div class="p-tag" style="background:${PLAYER_COLORS[i]}">${initials(name)}</div>
+      <div class="p-tag" style="background:${PLAYER_COLORS[i]}">${escapeHTML(displayInitials(round,i))}</div>
       <div class="p-name">${escapeHTML(name)}</div>
       <div class="pt-chip ${pts>0?'has':''}">${result.ready ? (pts>0 ? '+'+pts : '—') : ''}</div>
       <div class="stepper ${round.locked?'locked-disabled':''}">
