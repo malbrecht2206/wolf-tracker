@@ -111,6 +111,10 @@
     display:flex; align-items:center; justify-content:center;
     font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:12px; color:var(--white);
   }
+  .player-sub-row{display:flex; gap:10px; margin:0 0 14px 40px;}
+  .player-sub-field{display:flex; flex-direction:column; gap:4px;}
+  .player-sub-field label{font-size:9px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.4px; font-weight:700;}
+  .player-sub-field input{width:72px; text-align:center; padding:7px 4px;}
 
   /* Pars row */
   .par-grid{display:grid; grid-template-columns:repeat(9,1fr); gap:5px;}
@@ -230,14 +234,16 @@
   .pill.special.selected{background:var(--gold); border-color:var(--gold); color:var(--fairway-dark);}
 
   .result-banner{
-    margin-top:14px; border-radius:12px; padding:12px 14px;
-    font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:700;
-    display:flex; align-items:center; justify-content:space-between;
+    margin-top:14px; border-radius:12px; padding:11px 12px;
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:700;
+    display:flex; align-items:baseline; gap:6px;
+    white-space:nowrap; overflow-x:auto;
   }
+  .result-banner .rb-pts{flex-shrink:0;}
   .result-banner.wolf-win{background:#E4F1E7; color:var(--green-score);}
   .result-banner.other-win{background:#F7E9E4; color:var(--red);}
-  .result-banner.tie{background:var(--parchment-dim); color:var(--ink-soft);}
-  .result-banner.pending{background:var(--parchment-dim); color:var(--ink-soft); font-weight:600;}
+  .result-banner.tie{background:var(--parchment-dim); color:var(--ink-soft); white-space:normal;}
+  .result-banner.pending{background:var(--parchment-dim); color:var(--ink-soft); font-weight:600; white-space:normal;}
 
   /* Bottom nav */
   .bottom-nav{
@@ -384,6 +390,7 @@ function newRound(){
     course: "",
     date: todayISO(),
     players: ["Player 1","Player 2","Player 3","Player 4"],
+    playerInitials: ["","","",""], // blank = auto-derive from name
     startingPts: [0,0,0,0],
     pars: [4,4,4,4,4,4,4,4,4, 4,4,4,4,4,4,4,4,4],
     holes: Array.from({length:18}, (_,idx)=>emptyHole(idx)),
@@ -396,6 +403,11 @@ function newRound(){
   };
 }
 
+function displayInitials(round, i){
+  const custom = round.playerInitials && round.playerInitials[i];
+  return (custom && custom.trim()) ? custom.trim().toUpperCase().slice(0,3) : initials(round.players[i]);
+}
+
 // Ensures older saved rounds (single flat scoring object, no startingPts) work with the newer front/back shape.
 function normalizeRound(round){
   if(round.historical) return round;
@@ -406,6 +418,7 @@ function normalizeRound(round){
   }
   if(round.scoringSplit===undefined) round.scoringSplit = false;
   if(!round.startingPts) round.startingPts = [0,0,0,0];
+  if(!round.playerInitials) round.playerInitials = ["","","",""];
   return round;
 }
 
@@ -866,15 +879,20 @@ function renderRoundsList(){
 
 /* ----- Setup fields shared (used in settings modal for existing round, and inline for new) ----- */
 function playerRowsHTML(round){
-  return `<div style="display:flex; gap:10px; margin:0 0 6px 44px;">
-      <span style="flex:1; font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.5px;">Name</span>
-      <span style="width:58px; font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.5px; text-align:center;">Start pts</span>
-    </div>` +
-    round.players.map((name,i)=>`
+  return round.players.map((name,i)=>`
     <div class="player-input-row">
-      <div class="player-swatch" style="background:${PLAYER_COLORS[i]}">${initials(name)}</div>
+      <div class="player-swatch" style="background:${PLAYER_COLORS[i]}">${escapeHTML(displayInitials(round,i))}</div>
       <input type="text" class="player-name-input" data-pidx="${i}" value="${escapeHTML(name)}" placeholder="Player ${i+1} name">
-      <input type="number" class="startpts-input" data-pidx="${i}" value="${round.startingPts ? round.startingPts[i] : 0}" placeholder="0" style="width:58px; flex-shrink:0; text-align:center;">
+    </div>
+    <div class="player-sub-row">
+      <div class="player-sub-field">
+        <label>Initials</label>
+        <input type="text" class="player-initials-input" data-pidx="${i}" maxlength="3" value="${escapeHTML(round.playerInitials ? round.playerInitials[i] : '')}" placeholder="${escapeHTML(initials(name))}">
+      </div>
+      <div class="player-sub-field">
+        <label>Start pts</label>
+        <input type="number" class="startpts-input" data-pidx="${i}" value="${round.startingPts ? round.startingPts[i] : 0}" placeholder="0">
+      </div>
     </div>`).join("");
 }
 
@@ -949,15 +967,15 @@ function renderCardView(round){
 
   let banner = "";
   if(result.ready){
-    const typeLabel = result.type==="wolf"?"Wolf":(result.type==="lone"?"Lone Wolf":"Blind Wolf");
     if(result.winner==="tie"){
       banner = `<div class="result-banner tie">Tie — no points this hole</div>`;
     } else {
-      const winners = (result.winner==="team1"?result.team1:result.team2).map(i=>round.players[i]).join(" & ");
+      const winnerNames = (result.winner==="team1"?result.team1:result.team2).map(i=>round.players[i]);
+      const winners = winnerNames.length<=2 ? winnerNames.join(" & ") : winnerNames.slice(0,-1).join(", ") + " & " + winnerNames[winnerNames.length-1];
       const half = idx<9 ? "front" : "back";
       const pts = result.winner==="team1" ? round.scoring[half][result.type].team : round.scoring[half][result.type].other;
       banner = `<div class="result-banner ${result.winner==='team1'?'wolf-win':'other-win'}">
-        <span>${escapeHTML(winners)} win (${typeLabel})</span><span>+${pts} pt${pts===1?'':'s'} each</span>
+        <span>${escapeHTML(winners)} win</span><span class="rb-pts">+${pts} each</span>
       </div>`;
     }
   } else if(h.wolf!==null && h.partnerType!==null){
@@ -1031,7 +1049,7 @@ function renderGridView(round){
     return round.players.map((name,i)=>{
       const cells = Array.from({length:to-from},(_,k)=>scoreCell(i, from+k)).join("");
       const sub = sumRange(i, from, to);
-      return `<tr><td class="name-col"><span style="color:${PLAYER_COLORS[i]}">●</span> ${escapeHTML(name)}</td>${cells}<td><strong>${sub}</strong></td></tr>`;
+      return `<tr><td class="name-col"><span style="color:${PLAYER_COLORS[i]}">●</span> ${escapeHTML(displayInitials(round,i))}</td>${cells}<td><strong>${sub}</strong></td></tr>`;
     }).join("");
   }
 
@@ -1490,6 +1508,10 @@ function openModal(mode, prebuiltRound, fromScan){
     round.date = document.getElementById("mDate").value || todayISO();
     overlay.querySelectorAll(".player-name-input").forEach(inp=>{
       round.players[+inp.dataset.pidx] = inp.value.trim() || ("Player "+(+inp.dataset.pidx+1));
+    });
+    overlay.querySelectorAll(".player-initials-input").forEach(inp=>{
+      if(!round.playerInitials) round.playerInitials = ["","","",""];
+      round.playerInitials[+inp.dataset.pidx] = inp.value.trim().toUpperCase().slice(0,3);
     });
     overlay.querySelectorAll(".startpts-input").forEach(inp=>{
       const v = parseInt(inp.value,10);
