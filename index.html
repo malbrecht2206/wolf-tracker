@@ -262,20 +262,20 @@
 
   /* Grid / table view */
   .table-wrap{overflow-x:auto; border-radius:14px; border:1px solid var(--line);}
-  table{border-collapse:collapse; width:100%; font-family:'IBM Plex Mono',monospace; font-size:12.5px; background:var(--white);}
-  th,td{padding:7px 8px; text-align:center; border-bottom:1px solid var(--line); white-space:nowrap;}
+  table{border-collapse:collapse; width:100%; font-family:'IBM Plex Mono',monospace; font-size:11px; background:var(--white);}
+  th,td{padding:5px 3px; text-align:center; border-bottom:1px solid var(--line); white-space:nowrap;}
   thead th{
-    background:var(--fairway); color:var(--white); font-size:10px; text-transform:uppercase;
-    letter-spacing:.5px; position:sticky; top:0;
+    background:var(--fairway); color:var(--white); font-size:9px; text-transform:uppercase;
+    letter-spacing:.3px; position:sticky; top:0;
   }
   tbody tr:nth-child(9), tbody tr:nth-child(18){background:var(--parchment-dim); font-weight:700;}
-  td.name-col, th.name-col{text-align:left; position:sticky; left:0; background:var(--white); font-weight:700;}
+  td.name-col, th.name-col{text-align:left; position:sticky; left:0; background:var(--white); font-weight:700; padding-left:6px; padding-right:5px;}
   thead th.name-col{background:var(--fairway);}
   td.over{color:var(--red); font-weight:700;}
   td.under{color:var(--green-score); font-weight:700;}
-  .mark{position:relative; display:inline-flex; align-items:center; justify-content:center; width:25px; height:23px; vertical-align:middle;}
+  .mark{position:relative; display:inline-flex; align-items:center; justify-content:center; width:19px; height:18px; vertical-align:middle;}
   .mark svg{position:absolute; inset:0; width:100%; height:100%; overflow:visible;}
-  .mark-num{position:relative; z-index:1; font-family:'IBM Plex Mono',monospace; font-weight:700;}
+  .mark-num{position:relative; z-index:1; font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:10.5px;}
   .grid-legend{display:flex; flex-wrap:wrap; gap:12px; margin:2px 0 12px; font-size:11px; color:var(--ink-soft);}
   .grid-legend .li{display:flex; align-items:center; gap:6px;}
   .grid-legend .mark{width:20px; height:19px;}
@@ -1077,11 +1077,11 @@ function renderGridView(round){
   }
 
   return `
-    <div class="card" style="padding:12px;">
+    <div class="card" style="padding:8px;">
       <div class="card-title">Scores</div>
       <div class="grid-legend">
-        <div class="li">${markHTML("circle","")}<span>Birdie</span></div>
         <div class="li">${markHTML("dcircle","")}<span>Eagle+</span></div>
+        <div class="li">${markHTML("circle","")}<span>Birdie</span></div>
         <div class="li">${markHTML("square","")}<span>Bogey</span></div>
         <div class="li">${markHTML("triangle","")}<span>Double+</span></div>
       </div>
@@ -1099,7 +1099,7 @@ function renderGridView(round){
         </table>
       </div>
     </div>
-    <div class="card" style="padding:12px;">
+    <div class="card" style="padding:8px;">
       <div class="card-title">Wolf log — front 9</div>
       <div class="table-wrap">
         <table>
