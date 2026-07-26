@@ -136,6 +136,7 @@
   .par-cell{text-align:center;}
   .par-cell input{padding:8px 2px; text-align:center; font-family:'IBM Plex Mono',monospace; font-weight:600;}
   .par-cell span{display:block; font-size:9px; color:var(--ink-soft); margin-bottom:3px; font-weight:700;}
+  .par-cell .yd-input{margin-top:4px; padding:6px 2px; font-size:11px; font-weight:500; color:var(--ink-soft);}
 
   /* Hole navigator */
   .hole-nav{
@@ -407,6 +408,7 @@ function newRound(){
     playerInitials: ["","","",""], // blank = auto-derive from name
     startingPts: [0,0,0,0],
     pars: [4,4,4,4,4,4,4,4,4, 4,4,4,4,4,4,4,4,4],
+    yardages: Array(18).fill(null),
     holes: Array.from({length:18}, (_,idx)=>emptyHole(idx)),
     scoringSplit: false,
     scoring: {
@@ -414,6 +416,7 @@ function newRound(){
       back: JSON.parse(JSON.stringify(DEFAULT_SCORING))
     },
     locked: false,
+    excludeFromSeason: false,
     createdAt: Date.now()
   };
 }
@@ -426,6 +429,7 @@ function displayInitials(round, i){
 // Ensures older saved rounds (single flat scoring object, no startingPts) work with the newer front/back shape.
 function normalizeRound(round){
   if(round.locked===undefined) round.locked = false;
+  if(round.excludeFromSeason===undefined) round.excludeFromSeason = false;
   if(round.historical) return round;
   if(!round.scoring) round.scoring = {front: JSON.parse(JSON.stringify(DEFAULT_SCORING)), back: JSON.parse(JSON.stringify(DEFAULT_SCORING))};
   if(!round.scoring.front || !round.scoring.back){
@@ -435,6 +439,7 @@ function normalizeRound(round){
   if(round.scoringSplit===undefined) round.scoringSplit = false;
   if(!round.startingPts) round.startingPts = [0,0,0,0];
   if(!round.playerInitials) round.playerInitials = ["","","",""];
+  if(!round.yardages) round.yardages = Array(18).fill(null);
   return round;
 }
 
@@ -483,8 +488,23 @@ const FIREBASE_CONFIG = {
 };
 const LEAGUE_ID = "habs-wolf-league";
 const FIRESTORE_COLLECTION = "wolfTrackerLeagues";
-const NAV_KEY = "nav";        // local-only per-device: which round/hole/tab you're on
-const ROUNDS_CACHE_KEY = "roundsCache"; // local mirror of the shared data, for a fast first paint / offline fallback
+const STANDALONE_COLLECTION = "wolfTrackerStandalone";
+
+// A `?round=<id>` URL parameter switches the whole app into "standalone" mode: it talks to a
+// completely separate Firestore document (not the league's), shows only that one round, and
+// never touches or exposes the league's season data. Used for sharing a single round with
+// people outside the league.
+const urlParams = new URLSearchParams(window.location.search);
+const STANDALONE_ID = urlParams.get("round");
+const IS_STANDALONE = !!STANDALONE_ID;
+
+function getSyncDocRef(db, docFn){
+  if(IS_STANDALONE) return docFn(db, STANDALONE_COLLECTION, STANDALONE_ID);
+  return docFn(db, FIRESTORE_COLLECTION, LEAGUE_ID);
+}
+
+const NAV_KEY = IS_STANDALONE ? ("nav_standalone_"+STANDALONE_ID) : "nav";        // local-only per-device: which round/hole/tab you're on
+const ROUNDS_CACHE_KEY = IS_STANDALONE ? ("roundsCache_standalone_"+STANDALONE_ID) : "roundsCache"; // local mirror of the shared data, for a fast first paint / offline fallback
 
 let syncStatus = "connecting"; // connecting | live | error
 let firebaseMod = null;
@@ -518,7 +538,7 @@ let pendingRemoteRender = false;
 async function initFirestoreSync(){
   try{
     const { db, doc, onSnapshot } = await loadFirebaseSdk();
-    const ref = doc(db, FIRESTORE_COLLECTION, LEAGUE_ID);
+    const ref = getSyncDocRef(db, doc);
     let announced = false;
     firestoreUnsub = onSnapshot(ref, (snap)=>{
       const data = snap.data();
@@ -535,7 +555,7 @@ async function initFirestoreSync(){
       if(loaded){
         if(isModalOpen()) pendingRemoteRender = true;
         else render();
-        if(!announced){ announced = true; showToast("Connected to your league"); }
+        if(!announced){ announced = true; showToast(IS_STANDALONE ? "Connected" : "Connected to your league"); }
       }
     }, (err)=>{
       console.error("firestore snapshot error", err);
@@ -556,13 +576,13 @@ function saveRoundsShared(){
     storageAdapter.set(ROUNDS_CACHE_KEY, JSON.stringify({rounds, roundOrder}));
     try{
       const { db, doc, setDoc } = await loadFirebaseSdk();
-      const ref = doc(db, FIRESTORE_COLLECTION, LEAGUE_ID);
+      const ref = getSyncDocRef(db, doc);
       await setDoc(ref, { payload: JSON.stringify({rounds, roundOrder}), updatedAt: Date.now() });
       syncStatus = "live";
     }catch(e){
       console.error("firestore save failed", e);
       syncStatus = "error";
-      showToast("Couldn't sync to your league — check your connection");
+      showToast(IS_STANDALONE ? "Couldn't sync — check your connection" : "Couldn't sync to your league — check your connection");
     }
   }, 400);
 }
@@ -707,6 +727,7 @@ function computeSeasonTotals(year){
   roundOrder.forEach(id=>{
     const round = rounds[id];
     if(!round) return;
+    if(round.excludeFromSeason) return;
     if(year!=null && getRoundYear(round)!==year) return;
     if(!isRoundComplete(round)) return;
     const totals = computeRoundTotals(round);
@@ -739,7 +760,8 @@ const ICONS = {
   download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`,
   camera: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
   lock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
-  unlock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-1.9"/></svg>`
+  unlock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-1.9"/></svg>`,
+  share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.7 15.8 6.3M8.2 13.3l7.6 4.4"/></svg>`
 };
 
 /* ---------- rendering ---------- */
@@ -751,6 +773,26 @@ function render(){
 
   if(round && round.historical && (activeTab==="card" || activeTab==="grid")){
     activeTab = "board";
+  }
+
+  if(IS_STANDALONE){
+    if(!round){
+      headerHTML = headerBar("Wolf Scorecard", "Shared round", false);
+      mainHTML = `<div class="empty-state">${ICONS.flag}<p><strong>${loaded ? "Round not found" : "Loading…"}</strong></p><p>${loaded ? "This shared round link may be invalid, or it hasn't finished syncing yet — try reloading." : "Connecting to the shared round…"}</p></div>`;
+    } else if(activeTab==="grid"){
+      headerHTML = headerBar(round.course || "Untitled course", fmtDate(round.date), true, round.locked);
+      mainHTML = renderGridView(round);
+    } else if(activeTab==="board"){
+      headerHTML = headerBar(round.course || "Untitled round", fmtDate(round.date), true, round.locked);
+      mainHTML = renderBoardView(round);
+    } else {
+      headerHTML = headerBar(round.course || "Untitled course", fmtDate(round.date), true, round.locked);
+      mainHTML = renderCardView(round);
+    }
+    navHTML = round ? renderBottomNav(false, round.historical, true) : "";
+    app.innerHTML = headerHTML + `<main id="main">${mainHTML}</main>` + navHTML + `<div class="toast" id="toast"></div>`;
+    attachHandlers();
+    return;
   }
 
   if(activeTab==="rounds" || !round){
@@ -803,13 +845,13 @@ function headerBar(title, sub, showSettings, locked){
   </div>`;
 }
 
-function renderBottomNav(disabled, isHistorical){
+function renderBottomNav(disabled, isHistorical, hideRounds){
   const tabs = [
     {id:"card", icon:ICONS.card, label:"Scorecard"},
     {id:"grid", icon:ICONS.grid, label:"Grid"},
     {id:"board", icon:ICONS.trophy, label:"Leaders"},
     {id:"rounds", icon:ICONS.list, label:"Rounds"}
-  ];
+  ].filter(t=> !(hideRounds && t.id==="rounds"));
   return `<nav class="bottom-nav">
     ${tabs.map(t=>{
       const hideForHistorical = isHistorical && (t.id==="card" || t.id==="grid");
@@ -881,7 +923,7 @@ function renderRoundsList(){
       }
       html += `<div class="round-card" data-open-round="${id}">
         <div>
-          <div class="rc-course">${escapeHTML(r.course || (r.historical ? "Historical round" : "Untitled course"))} <span class="status-tag ${complete?'final':'progress'}">${complete?'Final':'In progress'}</span>${r.locked ? `<span style="display:inline-flex; width:12px; height:12px; vertical-align:middle; margin-left:5px; color:var(--gold);">${ICONS.lock}</span>` : ""}</div>
+          <div class="rc-course">${escapeHTML(r.course || (r.historical ? "Historical round" : "Untitled course"))} <span class="status-tag ${complete?'final':'progress'}">${complete?'Final':'In progress'}</span>${r.excludeFromSeason ? `<span class="status-tag progress" style="background:none; border:1px dashed var(--ink-soft);">Not in season</span>` : ""}${r.locked ? `<span style="display:inline-flex; width:12px; height:12px; vertical-align:middle; margin-left:5px; color:var(--gold);">${ICONS.lock}</span>` : ""}</div>
           <div class="rc-date">${fmtDate(r.date)} · ${leaderText}</div>
         </div>
         ${ICONS.chevR}
@@ -894,6 +936,7 @@ function renderRoundsList(){
     html += `<button class="btn btn-ghost btn-block" id="btnScanRound" style="margin-top:10px;">${ICONS.camera} Scan scorecard photo</button>`;
   }
   html += `<button class="btn btn-ghost btn-block" id="btnCreateHistorical" style="margin-top:10px;">${ICONS.clock} Add historical round</button>`;
+  html += `<button class="btn btn-ghost btn-block" id="btnShareStandalone" style="margin-top:10px;">${ICONS.share} Share a one-off round</button>`;
   html += `<button class="btn btn-ghost btn-block" id="btnBackup" style="margin-top:10px;">${ICONS.download} Backup &amp; restore data</button>`;
   return html;
 }
@@ -918,10 +961,12 @@ function playerRowsHTML(round){
 }
 
 function parGridHTML(round){
+  const yardages = round.yardages || Array(18).fill(null);
   return `<div class="par-grid">${round.pars.map((p,i)=>`
     <div class="par-cell">
       <span>${i+1}</span>
       <input type="number" min="3" max="6" class="par-input" data-hidx="${i}" value="${p}">
+      <input type="number" min="0" max="700" class="yd-input yardage-input" data-hidx="${i}" value="${yardages[i]===null||yardages[i]===undefined?'':yardages[i]}" placeholder="yds">
     </div>`).join("")}</div>`;
 }
 
@@ -1030,6 +1075,13 @@ function renderGridView(round){
   const totals = computeRoundTotals(round);
   const outPar = round.pars.slice(0,9).reduce((a,b)=>a+b,0);
   const inPar = round.pars.slice(9,18).reduce((a,b)=>a+b,0);
+  const yardages = round.yardages || Array(18).fill(null);
+  const hasYardage = yardages.some(y=> y!==null && y!==undefined && y!=="");
+  const sumYds = (from,to)=>{
+    let sum=0, any=false;
+    for(let k=from;k<to;k++){ const y=yardages[k]; if(y!==null && y!==undefined && y!==""){ sum+=Number(y); any=true; } }
+    return any ? sum : "–";
+  };
 
   function markHTML(shape, value){
     let svg = "";
@@ -1039,8 +1091,8 @@ function renderGridView(round){
       svg = `<svg viewBox="0 0 26 24"><circle cx="13" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="13" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`;
     } else if(shape==="square"){
       svg = `<svg viewBox="0 0 26 24"><rect x="2" y="1.5" width="22" height="21" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
-    } else if(shape==="triangle"){
-      svg = `<svg viewBox="0 0 26 24"><polygon points="13,1.5 2,22 24,22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+    } else if(shape==="dsquare"){
+      svg = `<svg viewBox="0 0 26 24"><rect x="2" y="1.5" width="22" height="21" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="5.5" y="4.5" width="15" height="15" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`;
     }
     return `<span class="mark">${svg}<span class="mark-num">${value}</span></span>`;
   }
@@ -1054,7 +1106,7 @@ function renderGridView(round){
     if(diff===-1) shape="circle";
     else if(diff<=-2) shape="dcircle";
     else if(diff===1) shape="square";
-    else if(diff>=2) shape="triangle";
+    else if(diff>=2) shape="dsquare";
     const content = shape ? markHTML(shape, s) : s;
     return `<td class="${cls}">${content}</td>`;
   }
@@ -1066,6 +1118,7 @@ function renderGridView(round){
 
   const holeHeaderRow = (from,to)=> Array.from({length:to-from},(_,k)=>from+k+1).map(n=>`<th>${n}</th>`).join("");
   const parRow = (from,to)=> `<tr><td class="name-col">Par</td>${round.pars.slice(from,to).map(p=>`<td>${p}</td>`).join("")}<td><strong>${from===0?outPar:inPar}</strong></td></tr>`;
+  const yardageRow = (from,to)=> `<tr><td class="name-col" style="font-weight:500; color:var(--ink-soft);">Yds</td>${yardages.slice(from,to).map(y=>`<td style="color:var(--ink-soft); font-weight:500;">${y===null||y===undefined||y===""?'–':y}</td>`).join("")}<td><strong>${sumYds(from,to)}</strong></td></tr>`;
 
   function playerRows(from,to){
     return round.players.map((name,i)=>{
@@ -1105,19 +1158,19 @@ function renderGridView(round){
         <div class="li">${markHTML("dcircle","")}<span>Eagle+</span></div>
         <div class="li">${markHTML("circle","")}<span>Birdie</span></div>
         <div class="li">${markHTML("square","")}<span>Bogey</span></div>
-        <div class="li">${markHTML("triangle","")}<span>Double+</span></div>
+        <div class="li">${markHTML("dsquare","")}<span>Double+</span></div>
       </div>
       <div class="table-wrap">
         <table>
           <thead><tr><th class="name-col">Hole</th>${holeHeaderRow(0,9)}<th>Out</th></tr></thead>
-          <tbody>${parRow(0,9)}${playerRows(0,9)}</tbody>
+          <tbody>${hasYardage ? yardageRow(0,9) : ""}${parRow(0,9)}${playerRows(0,9)}</tbody>
         </table>
       </div>
       <div style="height:10px;"></div>
       <div class="table-wrap">
         <table>
           <thead><tr><th class="name-col">Hole</th>${holeHeaderRow(9,18)}<th>In</th></tr></thead>
-          <tbody>${parRow(9,18)}${playerRows(9,18)}</tbody>
+          <tbody>${hasYardage ? yardageRow(9,18) : ""}${parRow(9,18)}${playerRows(9,18)}</tbody>
         </table>
       </div>
     </div>
@@ -1147,11 +1200,12 @@ function renderBoardView(round){
   const roundYear = getRoundYear(round);
   const season = computeSeasonTotals(roundYear);
   const complete = isRoundComplete(round);
+  const excluded = round.excludeFromSeason;
 
   return `
     <div class="card">
       <div class="card-title">This round ${complete ? '' : '<span style="color:var(--ink-soft); font-weight:600; text-transform:none; letter-spacing:0; font-size:11px;">· in progress</span>'}</div>
-      ${!complete ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">Season points are provisional and won't count toward standings until every score for this round is entered.</p>` : ""}
+      ${excluded ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">This round is set to not count toward season standings.</p>` : (!complete ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">Season points are provisional and won't count toward standings until every score for this round is entered.</p>` : "")}
       ${totals.map(t=>`
         <div class="lb-row">
           <div class="lb-rank ${t.rank===1?'gold':''}">${t.rank}</div>
@@ -1169,13 +1223,13 @@ function renderBoardView(round){
               <div class="stat-lbl">wolf pts</div>
             </div>
             <div class="stat-block emph">
-              <div class="stat-val">${complete ? '+'+t.seasonPoints : (t.holesPlayed? '('+t.seasonPoints+')' : '–')}</div>
-              <div class="stat-lbl">season</div>
+              <div class="stat-val">${excluded ? '—' : (complete ? '+'+t.seasonPoints : (t.holesPlayed? '('+t.seasonPoints+')' : '–'))}</div>
+              <div class="stat-lbl">${IS_STANDALONE ? 'placement' : 'season'}</div>
             </div>
           </div>
         </div>`).join("")}
     </div>
-    <div class="card">
+    ${IS_STANDALONE ? "" : `<div class="card">
       <div class="card-title">${roundYear} season standings</div>
       ${season.length ? season.map((p,i)=>`
         <div class="lb-row">
@@ -1190,7 +1244,7 @@ function renderBoardView(round){
             <div class="lb-pts-lbl">pts</div>
           </div>
         </div>`).join("") : `<p style="font-size:13px;color:var(--ink-soft);">No completed rounds recorded for the ${roundYear} season yet.</p>`}
-    </div>
+    </div>`}
   `;
 }
 
@@ -1212,6 +1266,7 @@ function newHistoricalRound(){
     manualScores: [null,null,null,null],
     manualPts: [null,null,null,null],
     locked: false,
+    excludeFromSeason: false,
     createdAt: Date.now()
   };
 }
@@ -1254,6 +1309,116 @@ function openHolePicker(round){
       render();
     };
   });
+}
+
+function openShareStandaloneModal(){
+  let step = "form"; // form | creating | done
+  let shareUrl = "";
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "modalOverlay";
+
+  function paint(){
+    let inner;
+    if(step==="form"){
+      const draftPlayers = ["Player 1","Player 2","Player 3","Player 4"];
+      inner = `
+        <div class="modal-handle"></div>
+        <div class="modal-title">Share a one-off round</div>
+        <p style="font-size:12.5px; color:var(--ink-soft); margin:-6px 0 14px;">Creates a brand-new round with its own private link. It never counts toward your league's season, and anyone you send the link to only sees this one round — not your league's other rounds or standings.</p>
+        <div class="field">
+          <label class="field-label">Course</label>
+          <input type="text" id="ssCourse" placeholder="e.g. Wallinwood">
+        </div>
+        <div class="field">
+          <label class="field-label">Date</label>
+          <input type="date" id="ssDate" value="${todayISO()}">
+        </div>
+        <label class="field-label">Players</label>
+        ${draftPlayers.map((name,i)=>`
+          <div class="player-input-row">
+            <div class="player-swatch" style="background:${PLAYER_COLORS[i]}">${escapeHTML(initials(name))}</div>
+            <input type="text" class="ss-player-input" data-pidx="${i}" value="" placeholder="Player ${i+1} name">
+          </div>`).join("")}
+        <div style="display:flex; gap:10px; margin-top:16px;">
+          <button class="btn btn-ghost" id="ssCancel" style="flex:1;">Cancel</button>
+          <button class="btn btn-primary" id="ssCreate" style="flex:1.4;">${ICONS.share} Create &amp; get link</button>
+        </div>`;
+    } else if(step==="creating"){
+      inner = `
+        <div class="modal-handle"></div>
+        <div style="text-align:center; padding:30px 0 20px;">
+          <div class="spinner"></div>
+          <div style="font-family:'IBM Plex Mono',monospace; font-weight:700; color:var(--fairway); font-size:13.5px;">Creating your link…</div>
+        </div>`;
+    } else {
+      inner = `
+        <div class="modal-handle"></div>
+        <div class="modal-title">Your link is ready</div>
+        <p style="font-size:12.5px; color:var(--ink-soft); margin:-6px 0 14px;">Send this to anyone — they can open it and use this round without seeing your league.</p>
+        <textarea class="backup-textarea" id="ssLinkBox" readonly style="min-height:60px;">${escapeHTML(shareUrl)}</textarea>
+        <button class="btn btn-primary btn-block" id="ssCopy" style="margin-top:10px;">Copy link</button>
+        <button class="btn btn-ghost btn-block" id="ssDone" style="margin-top:10px;">Done</button>`;
+    }
+    overlay.querySelector(".modal-sheet").innerHTML = inner;
+    wire();
+  }
+
+  function wire(){
+    if(step==="form"){
+      document.getElementById("ssCancel").onclick = ()=> closeOverlay(overlay);
+      document.getElementById("ssCreate").onclick = async ()=>{
+        const course = document.getElementById("ssCourse").value.trim();
+        const date = document.getElementById("ssDate").value || todayISO();
+        const players = ["Player 1","Player 2","Player 3","Player 4"];
+        overlay.querySelectorAll(".ss-player-input").forEach(inp=>{
+          const v = inp.value.trim();
+          if(v) players[+inp.dataset.pidx] = v;
+        });
+
+        step = "creating";
+        paint();
+
+        try{
+          const round = newRound();
+          round.course = course.slice(0,60);
+          round.date = date;
+          round.players = players.map(p=>p.slice(0,24));
+          round.excludeFromSeason = true;
+
+          const { db, doc, setDoc } = await loadFirebaseSdk();
+          const ref = doc(db, STANDALONE_COLLECTION, round.id);
+          await setDoc(ref, { payload: JSON.stringify({rounds:{[round.id]:round}, roundOrder:[round.id]}), updatedAt: Date.now() });
+
+          shareUrl = location.origin + location.pathname + "?round=" + round.id;
+          step = "done";
+          paint();
+        }catch(e){
+          console.error("failed to create standalone round", e);
+          step = "form";
+          paint();
+          showToast("Couldn't create the link — check your connection and try again");
+        }
+      };
+    } else if(step==="done"){
+      document.getElementById("ssCopy").onclick = async ()=>{
+        const box = document.getElementById("ssLinkBox");
+        box.select();
+        try{
+          await navigator.clipboard.writeText(shareUrl);
+          showToast("Link copied");
+        }catch(e){
+          showToast("Select all (already highlighted) and copy manually");
+        }
+      };
+      document.getElementById("ssDone").onclick = ()=> closeOverlay(overlay);
+    }
+  }
+
+  overlay.innerHTML = `<div class="modal-sheet"></div>`;
+  document.getElementById("app").appendChild(overlay);
+  overlay.addEventListener("click", e=>{ if(e.target===overlay && step!=="creating") closeOverlay(overlay); });
+  paint();
 }
 
 function openBackupModal(){
@@ -1379,17 +1544,18 @@ function resizeImageToBase64(file, maxDim, quality){
   });
 }
 
-const SCORECARD_SCAN_PROMPT = `You are reading a photo of a golf scorecard used for a 4-player "Wolf" game. Extract what you can see and respond with ONLY valid JSON — no markdown, no code fences, no explanation, matching exactly this shape:
+const SCORECARD_SCAN_PROMPT = `You are reading a photo or screenshot of a golf scorecard (this could be a blank/unplayed card showing just course info, or a fully filled-in card from a completed "Wolf" game round for 4 players). Extract what you can see and respond with ONLY valid JSON — no markdown, no code fences, no explanation, matching exactly this shape:
 {
   "course": string or null,
   "date": "YYYY-MM-DD" or null,
   "players": [string, string, string, string],
-  "holes": [ {"par": number or null, "scores": [number|null, number|null, number|null, number|null]}, ... exactly 18 entries in hole order 1-18 ]
+  "holes": [ {"par": number or null, "yardage": number or null, "scores": [number|null, number|null, number|null, number|null]}, ... exactly 18 entries in hole order 1-18 ]
 }
 Rules:
-- "players" should be the 4 player names/initials in the same left-to-right column order they appear on the card. Use "" for any you can't read.
-- "holes" must always have exactly 18 entries even if the card only shows 9 holes — leave unseen holes with par null and scores [null,null,null,null].
-- Each hole's "scores" array is in the same player column order as "players".
+- "players" should be the 4 player names/initials in the same left-to-right column order they appear on the card. Use "" for any you can't read, or if the card has no player scores at all (a blank course card), leave all four as "".
+- "holes" must always have exactly 18 entries even if the card only shows 9 holes — leave unseen holes with par null, yardage null, and scores [null,null,null,null].
+- "yardage" is the hole length/distance in yards (or meters if that's what the card shows) — usually a number like 150-600 printed near the par for each hole. Use null if not shown or unreadable.
+- Each hole's "scores" array is in the same player column order as "players". If this is a blank course card with no scores filled in, every hole's "scores" should be [null,null,null,null].
 - Only include numbers you can actually read; use null rather than guessing.
 - Output raw JSON only, starting with { and ending with }.`;
 
@@ -1433,6 +1599,9 @@ async function handleScorecardFile(file){
         if(!h) return;
         const par = parseInt(h.par,10);
         if(!isNaN(par) && par>=3 && par<=6) round.pars[i] = par;
+        const yd = parseInt(h.yardage,10);
+        if(!round.yardages) round.yardages = Array(18).fill(null);
+        round.yardages[i] = (!isNaN(yd) && yd>=0 && yd<=700) ? yd : null;
         if(Array.isArray(h.scores)){
           const scores = h.scores.slice(0,4).map(s=>{
             const n = parseInt(s,10);
@@ -1494,11 +1663,15 @@ function openModal(mode, prebuiltRound, fromScan){
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <div class="modal-title">${mode==="new"?"New round":"Round settings"}</div>
-      ${fromScan ? `<div class="scan-banner">${ICONS.camera}<span>Pre-filled from your photo — double-check the course, date, names, and par below, then check each hole's scores on the Scorecard tab once you start.</span></div>` : ""}
+      ${fromScan ? `<div class="scan-banner">${ICONS.camera}<span>Pre-filled from your photo — double-check the course, date, names, par, and yardage below, then check each hole's scores on the Scorecard tab once you start.</span></div>` : ""}
       ${mode!=="new" ? `<div class="season-toggle-row">
         <span style="font-size:13px; font-weight:600;">Lock this round</span>
         <div class="switch" id="lockToggle"><div class="knob"></div></div>
       </div>` : ""}
+      ${IS_STANDALONE ? "" : `<div class="season-toggle-row">
+        <span style="font-size:13px; font-weight:600;">Don't count toward season standings</span>
+        <div class="switch ${round.excludeFromSeason?'on':''}" id="excludeToggle"><div class="knob"></div></div>
+      </div>`}
       <div class="field">
         <label class="field-label">Course</label>
         <input type="text" id="mCourse" value="${escapeHTML(round.course)}" placeholder="e.g. Wallinwood">
@@ -1510,7 +1683,7 @@ function openModal(mode, prebuiltRound, fromScan){
       <label class="field-label">Players &amp; starting Wolf points</label>
       ${playerRowsHTML(round)}
       <div class="section-gap"></div>
-      <label class="field-label">Par per hole</label>
+      <label class="field-label">Par &amp; yardage per hole</label>
       ${parGridHTML(round)}
       <div class="section-gap"></div>
       <label class="field-label">Wolf scoring (points per winning player)</label>
@@ -1556,6 +1729,14 @@ function openModal(mode, prebuiltRound, fromScan){
     document.getElementById("frontScoringLbl").style.display = round.scoringSplit ? "" : "none";
   };
 
+  const excludeToggle = document.getElementById("excludeToggle");
+  if(excludeToggle){
+    excludeToggle.onclick = ()=>{
+      round.excludeFromSeason = !round.excludeFromSeason;
+      excludeToggle.classList.toggle("on", round.excludeFromSeason);
+    };
+  }
+
   if(mode!=="new"){
     wireConfirmDelete(document.getElementById("mDelete"), ()=>{
       delete rounds[round.id];
@@ -1586,6 +1767,11 @@ function openModal(mode, prebuiltRound, fromScan){
     overlay.querySelectorAll(".par-input").forEach(inp=>{
       const v = parseInt(inp.value,10);
       round.pars[+inp.dataset.hidx] = isNaN(v) ? 4 : Math.max(3, Math.min(6, v));
+    });
+    overlay.querySelectorAll(".yardage-input").forEach(inp=>{
+      const v = parseInt(inp.value,10);
+      if(!round.yardages) round.yardages = Array(18).fill(null);
+      round.yardages[+inp.dataset.hidx] = (inp.value.trim()==="" || isNaN(v)) ? null : Math.max(0, Math.min(700, v));
     });
     overlay.querySelectorAll(".scoring-input").forEach(inp=>{
       const v = parseInt(inp.value,10);
@@ -1652,6 +1838,10 @@ function openHistoricalModal(mode){
         <span style="font-size:13px; font-weight:600;">Lock this round</span>
         <div class="switch" id="hLockToggle"><div class="knob"></div></div>
       </div>` : ""}
+      <div class="season-toggle-row">
+        <span style="font-size:13px; font-weight:600;">Don't count toward season standings</span>
+        <div class="switch ${round.excludeFromSeason?'on':''}" id="hExcludeToggle"><div class="knob"></div></div>
+      </div>
       <div class="field">
         <label class="field-label">Course</label>
         <input type="text" id="hCourse" value="${escapeHTML(round.course)}" placeholder="e.g. Wallinwood">
@@ -1699,6 +1889,12 @@ function openHistoricalModal(mode){
       showToast("Round locked");
     };
   }
+
+  const hExcludeToggle = document.getElementById("hExcludeToggle");
+  hExcludeToggle.onclick = ()=>{
+    round.excludeFromSeason = !round.excludeFromSeason;
+    hExcludeToggle.classList.toggle("on", round.excludeFromSeason);
+  };
 
   if(mode!=="new"){
     wireConfirmDelete(document.getElementById("hDelete"), ()=>{
@@ -1847,6 +2043,9 @@ function attachHandlers(){
   const btnCreateHistorical = document.getElementById("btnCreateHistorical");
   if(btnCreateHistorical) btnCreateHistorical.onclick = ()=> openHistoricalModal("new");
 
+  const btnShareStandalone = document.getElementById("btnShareStandalone");
+  if(btnShareStandalone) btnShareStandalone.onclick = ()=> openShareStandaloneModal();
+
   const btnBackup = document.getElementById("btnBackup");
   if(btnBackup) btnBackup.onclick = ()=> openBackupModal();
 
@@ -1962,7 +2161,11 @@ function attachHandlers(){
 (async function init(){
   app.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#F4EFDD;font-family:'Anton',sans-serif;letter-spacing:1px;">Loading…</div>`;
   await loadState();
-  if(currentRoundId && rounds[currentRoundId]){
+  if(IS_STANDALONE){
+    currentRoundId = STANDALONE_ID;
+    currentHole = currentHole || 0;
+    activeTab = "card";
+  } else if(currentRoundId && rounds[currentRoundId]){
     activeTab = "card";
   } else {
     activeTab = "rounds";
