@@ -190,12 +190,22 @@
   .nav-arrow:active{background:var(--fairway); color:var(--white);}
   .nav-arrow.disabled{opacity:.3; pointer-events:none;}
   .nav-arrow svg{width:20px;height:20px;}
+  .info-pills{flex:1; display:flex; gap:6px; min-width:0;}
   .par-pill{
-    flex:1; text-align:center; font-family:'IBM Plex Mono',monospace;
-    background:var(--parchment-dim); border-radius:11px; padding:8px 4px;
+    flex:1; display:flex; align-items:center; justify-content:space-between; text-align:center; font-family:'IBM Plex Mono',monospace;
+    background:var(--parchment-dim); border-radius:11px; padding:4px 2px; min-width:0;
   }
-  .par-pill .p{font-size:20px; font-weight:700; color:var(--fairway);}
-  .par-pill .l{font-size:9px; letter-spacing:1.5px; text-transform:uppercase; color:var(--ink-soft);}
+  .par-pill .p{font-size:19px; font-weight:700; color:var(--fairway);}
+  .par-pill .l{font-size:8px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-soft);}
+  .yd-direct-input{
+    width:100%; max-width:64px; border:none; background:transparent; padding:0;
+    font-family:'IBM Plex Mono',monospace; font-size:17px; font-weight:700; color:var(--fairway);
+    text-align:center; -moz-appearance:textfield;
+  }
+  .yd-direct-input::-webkit-outer-spin-button, .yd-direct-input::-webkit-inner-spin-button{-webkit-appearance:none; margin:0;}
+  .yd-direct-input:focus{outline:none;}
+  .par-adj{width:22px; height:30px; flex-shrink:0; border:none; background:transparent; color:var(--fairway); font-size:15px; font-weight:700; cursor:pointer; border-radius:8px;}
+  .par-adj:active{background:var(--line);}
 
   .hole-dots{display:flex; justify-content:center; gap:5px; margin:-2px 0 14px;}
   .dot{width:6px; height:6px; border-radius:50%; background:var(--line); cursor:pointer;}
@@ -404,6 +414,7 @@ function newRound(){
     id: uid(),
     course: "",
     date: todayISO(),
+    roundLength: 18, // 9 or 18 — a 9-hole round awards half season points
     players: ["Player 1","Player 2","Player 3","Player 4"],
     playerInitials: ["","","",""], // blank = auto-derive from name
     startingPts: [0,0,0,0],
@@ -430,6 +441,7 @@ function displayInitials(round, i){
 function normalizeRound(round){
   if(round.locked===undefined) round.locked = false;
   if(round.excludeFromSeason===undefined) round.excludeFromSeason = false;
+  if(round.roundLength!==9 && round.roundLength!==18) round.roundLength = 18;
   if(round.historical) return round;
   if(!round.scoring) round.scoring = {front: JSON.parse(JSON.stringify(DEFAULT_SCORING)), back: JSON.parse(JSON.stringify(DEFAULT_SCORING))};
   if(!round.scoring.front || !round.scoring.back){
@@ -693,6 +705,7 @@ function computeRoundTotals(round){
       t.rank = i+1;
     }
     t.seasonPoints = SEASON_PLACE_POINTS[t.rank-1] || 0;
+    if(round.roundLength===9) t.seasonPoints = t.seasonPoints / 2;
   });
   const byIdx = {};
   totals.forEach(t=> byIdx[t.idx]=t);
@@ -719,7 +732,8 @@ function isRoundComplete(round){
   if(round.historical){
     return round.manualPts.every(p=> p!=null && p!=="");
   }
-  return round.holes.every(h=> h.scores.every(s=> s!==null && s!==""));
+  const holesToCheck = round.roundLength===9 ? round.holes.slice(0,9) : round.holes;
+  return holesToCheck.every(h=> h.scores.every(s=> s!==null && s!==""));
 }
 
 function computeSeasonTotals(year){
@@ -923,7 +937,7 @@ function renderRoundsList(){
       }
       html += `<div class="round-card" data-open-round="${id}">
         <div>
-          <div class="rc-course">${escapeHTML(r.course || (r.historical ? "Historical round" : "Untitled course"))} <span class="status-tag ${complete?'final':'progress'}">${complete?'Final':'In progress'}</span>${r.excludeFromSeason ? `<span class="status-tag progress" style="background:none; border:1px dashed var(--ink-soft);">Not in season</span>` : ""}${r.locked ? `<span style="display:inline-flex; width:12px; height:12px; vertical-align:middle; margin-left:5px; color:var(--gold);">${ICONS.lock}</span>` : ""}</div>
+          <div class="rc-course">${escapeHTML(r.course || (r.historical ? "Historical round" : "Untitled course"))} <span class="status-tag ${complete?'final':'progress'}">${complete?'Final':'In progress'}</span>${r.roundLength===9 ? `<span class="status-tag progress" style="background:none; border:1px dashed var(--ink-soft);">9 holes</span>` : ""}${r.excludeFromSeason ? `<span class="status-tag progress" style="background:none; border:1px dashed var(--ink-soft);">Not in season</span>` : ""}${r.locked ? `<span style="display:inline-flex; width:12px; height:12px; vertical-align:middle; margin-left:5px; color:var(--gold);">${ICONS.lock}</span>` : ""}</div>
           <div class="rc-date">${fmtDate(r.date)} · ${leaderText}</div>
         </div>
         ${ICONS.chevR}
@@ -960,14 +974,19 @@ function playerRowsHTML(round){
     </div>`).join("");
 }
 
-function parGridHTML(round){
+function parGridHTML(round, from, to){
+  from = from===undefined ? 0 : from;
+  to = to===undefined ? 18 : to;
   const yardages = round.yardages || Array(18).fill(null);
-  return `<div class="par-grid">${round.pars.map((p,i)=>`
+  return `<div class="par-grid">${round.pars.slice(from,to).map((p,k)=>{
+    const i = from+k;
+    return `
     <div class="par-cell">
       <span>${i+1}</span>
       <input type="number" min="3" max="6" class="par-input" data-hidx="${i}" value="${p}">
       <input type="number" min="0" max="700" class="yd-input yardage-input" data-hidx="${i}" value="${yardages[i]===null||yardages[i]===undefined?'':yardages[i]}" placeholder="yds">
-    </div>`).join("")}</div>`;
+    </div>`;
+  }).join("")}</div>`;
 }
 
 function scoringRowsHTML(round, half){
@@ -992,8 +1011,9 @@ function renderCardView(round){
   const h = round.holes[idx];
   const par = round.pars[idx];
   const result = computeHole(round, idx);
+  const maxHole = round.roundLength===9 ? 9 : 18;
 
-  const dots = Array.from({length:18}, (_,i)=>{
+  const dots = Array.from({length:maxHole}, (_,i)=>{
     const filled = round.holes[i].scores.every(s=>s!==null && s!=="");
     return `<div class="dot ${i===idx?'active':(filled?'done':'')}" data-goto-hole="${i}"></div>`;
   }).join("");
@@ -1048,12 +1068,25 @@ function renderCardView(round){
     banner = `<div class="result-banner pending">Enter all 4 scores to see the result</div>`;
   }
 
+  const yd = (round.yardages && round.yardages[idx]!=null && round.yardages[idx]!=="") ? round.yardages[idx] : null;
+
   return `
     <div class="hole-nav">
       <button class="nav-arrow ${idx===0?'disabled':''}" id="btnPrevHole">${ICONS.chevL}</button>
       <div class="hole-badge" id="btnHolePicker"><div class="num">${idx+1}</div><div class="lbl">Hole</div></div>
-      <div class="par-pill"><div class="p">${par}</div><div class="l">Par</div></div>
-      <button class="nav-arrow ${idx===17?'disabled':''}" id="btnNextHole">${ICONS.chevR}</button>
+      <div class="info-pills">
+        <div class="par-pill ${round.locked?'locked-disabled':''}">
+          <button class="par-adj" data-par-dec>−</button>
+          <div><div class="p">${par}</div><div class="l">Par</div></div>
+          <button class="par-adj" data-par-inc>+</button>
+        </div>
+        <div class="par-pill ${round.locked?'locked-disabled':''}">
+          <button class="par-adj" data-yd-dec>−</button>
+          <div><input type="number" class="yd-direct-input" id="ydDirectInput" min="0" max="700" value="${yd===null?'':yd}" placeholder="–" ${round.locked?'disabled':''}><div class="l">Yds</div></div>
+          <button class="par-adj" data-yd-inc>+</button>
+        </div>
+      </div>
+      <button class="nav-arrow ${idx===maxHole-1?'disabled':''}" id="btnNextHole">${ICONS.chevR}</button>
     </div>
     <div class="hole-dots">${dots}</div>
     ${round.locked ? `<div class="locked-banner">${ICONS.lock} This round is locked — tap the lock icon in the header to make changes.</div>` : ""}
@@ -1151,6 +1184,8 @@ function renderGridView(round){
     }).join("");
   }
 
+  const is9 = round.roundLength===9;
+
   return `
     <div class="card" style="padding:8px;">
       <div class="card-title">Scores</div>
@@ -1162,26 +1197,28 @@ function renderGridView(round){
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th class="name-col">Hole</th>${holeHeaderRow(0,9)}<th>Out</th></tr></thead>
+          <thead><tr><th class="name-col">Hole</th>${holeHeaderRow(0,9)}<th>${is9?'Total':'Out'}</th></tr></thead>
           <tbody>${hasYardage ? yardageRow(0,9) : ""}${parRow(0,9)}${playerRows(0,9)}</tbody>
         </table>
       </div>
+      ${is9 ? "" : `
       <div style="height:10px;"></div>
       <div class="table-wrap">
         <table>
           <thead><tr><th class="name-col">Hole</th>${holeHeaderRow(9,18)}<th>In</th></tr></thead>
           <tbody>${hasYardage ? yardageRow(9,18) : ""}${parRow(9,18)}${playerRows(9,18)}</tbody>
         </table>
-      </div>
+      </div>`}
     </div>
     <div class="card" style="padding:8px;">
-      <div class="card-title">Wolf log — front 9</div>
+      <div class="card-title">Wolf log ${is9?'':'— front 9'}</div>
       <div class="table-wrap">
         <table>
           <thead><tr><th class="name-col">#</th><th>Wolf</th><th>Partner</th><th>Winner</th><th>Pts</th></tr></thead>
           <tbody>${wolfRows(0,9)}</tbody>
         </table>
       </div>
+      ${is9 ? "" : `
       <div style="height:10px;"></div>
       <div class="card-title">Wolf log — back 9</div>
       <div class="table-wrap">
@@ -1189,7 +1226,7 @@ function renderGridView(round){
           <thead><tr><th class="name-col">#</th><th>Wolf</th><th>Partner</th><th>Winner</th><th>Pts</th></tr></thead>
           <tbody>${wolfRows(9,18)}</tbody>
         </table>
-      </div>
+      </div>`}
     </div>
   `;
 }
@@ -1211,7 +1248,7 @@ function renderBoardView(round){
           <div class="lb-rank ${t.rank===1?'gold':''}">${t.rank}</div>
           <div style="flex:1;min-width:0;">
             <div class="lb-name">${escapeHTML(t.name)}</div>
-            <div class="lb-sub">${round.historical ? "historical" : t.holesPlayed+"/18 holes"}</div>
+            <div class="lb-sub">${round.historical ? "historical" : t.holesPlayed+"/"+(round.roundLength===9?9:18)+" holes"}</div>
           </div>
           <div class="stat-group">
             <div class="stat-block">
@@ -1262,6 +1299,7 @@ function newHistoricalRound(){
     historical: true,
     course: "",
     date: todayISO(),
+    roundLength: 18,
     players: ["Player 1","Player 2","Player 3","Player 4"],
     manualScores: [null,null,null,null],
     manualPts: [null,null,null,null],
@@ -1295,7 +1333,7 @@ function openHolePicker(round){
       <div class="modal-handle"></div>
       <div class="modal-title">Jump to hole</div>
       ${gridHTML(0,9,"Front 9")}
-      ${gridHTML(9,18,"Back 9")}
+      ${round.roundLength===9 ? "" : gridHTML(9,18,"Back 9")}
       <button class="btn btn-ghost btn-block" id="hpCancel" style="margin-top:6px;">Cancel</button>
     </div>`;
   document.getElementById("app").appendChild(overlay);
@@ -1309,116 +1347,6 @@ function openHolePicker(round){
       render();
     };
   });
-}
-
-function openShareStandaloneModal(){
-  let step = "form"; // form | creating | done
-  let shareUrl = "";
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.id = "modalOverlay";
-
-  function paint(){
-    let inner;
-    if(step==="form"){
-      const draftPlayers = ["Player 1","Player 2","Player 3","Player 4"];
-      inner = `
-        <div class="modal-handle"></div>
-        <div class="modal-title">Share a one-off round</div>
-        <p style="font-size:12.5px; color:var(--ink-soft); margin:-6px 0 14px;">Creates a brand-new round with its own private link. It never counts toward your league's season, and anyone you send the link to only sees this one round — not your league's other rounds or standings.</p>
-        <div class="field">
-          <label class="field-label">Course</label>
-          <input type="text" id="ssCourse" placeholder="e.g. Wallinwood">
-        </div>
-        <div class="field">
-          <label class="field-label">Date</label>
-          <input type="date" id="ssDate" value="${todayISO()}">
-        </div>
-        <label class="field-label">Players</label>
-        ${draftPlayers.map((name,i)=>`
-          <div class="player-input-row">
-            <div class="player-swatch" style="background:${PLAYER_COLORS[i]}">${escapeHTML(initials(name))}</div>
-            <input type="text" class="ss-player-input" data-pidx="${i}" value="" placeholder="Player ${i+1} name">
-          </div>`).join("")}
-        <div style="display:flex; gap:10px; margin-top:16px;">
-          <button class="btn btn-ghost" id="ssCancel" style="flex:1;">Cancel</button>
-          <button class="btn btn-primary" id="ssCreate" style="flex:1.4;">${ICONS.share} Create &amp; get link</button>
-        </div>`;
-    } else if(step==="creating"){
-      inner = `
-        <div class="modal-handle"></div>
-        <div style="text-align:center; padding:30px 0 20px;">
-          <div class="spinner"></div>
-          <div style="font-family:'IBM Plex Mono',monospace; font-weight:700; color:var(--fairway); font-size:13.5px;">Creating your link…</div>
-        </div>`;
-    } else {
-      inner = `
-        <div class="modal-handle"></div>
-        <div class="modal-title">Your link is ready</div>
-        <p style="font-size:12.5px; color:var(--ink-soft); margin:-6px 0 14px;">Send this to anyone — they can open it and use this round without seeing your league.</p>
-        <textarea class="backup-textarea" id="ssLinkBox" readonly style="min-height:60px;">${escapeHTML(shareUrl)}</textarea>
-        <button class="btn btn-primary btn-block" id="ssCopy" style="margin-top:10px;">Copy link</button>
-        <button class="btn btn-ghost btn-block" id="ssDone" style="margin-top:10px;">Done</button>`;
-    }
-    overlay.querySelector(".modal-sheet").innerHTML = inner;
-    wire();
-  }
-
-  function wire(){
-    if(step==="form"){
-      document.getElementById("ssCancel").onclick = ()=> closeOverlay(overlay);
-      document.getElementById("ssCreate").onclick = async ()=>{
-        const course = document.getElementById("ssCourse").value.trim();
-        const date = document.getElementById("ssDate").value || todayISO();
-        const players = ["Player 1","Player 2","Player 3","Player 4"];
-        overlay.querySelectorAll(".ss-player-input").forEach(inp=>{
-          const v = inp.value.trim();
-          if(v) players[+inp.dataset.pidx] = v;
-        });
-
-        step = "creating";
-        paint();
-
-        try{
-          const round = newRound();
-          round.course = course.slice(0,60);
-          round.date = date;
-          round.players = players.map(p=>p.slice(0,24));
-          round.excludeFromSeason = true;
-
-          const { db, doc, setDoc } = await loadFirebaseSdk();
-          const ref = doc(db, STANDALONE_COLLECTION, round.id);
-          await setDoc(ref, { payload: JSON.stringify({rounds:{[round.id]:round}, roundOrder:[round.id]}), updatedAt: Date.now() });
-
-          shareUrl = location.origin + location.pathname + "?round=" + round.id;
-          step = "done";
-          paint();
-        }catch(e){
-          console.error("failed to create standalone round", e);
-          step = "form";
-          paint();
-          showToast("Couldn't create the link — check your connection and try again");
-        }
-      };
-    } else if(step==="done"){
-      document.getElementById("ssCopy").onclick = async ()=>{
-        const box = document.getElementById("ssLinkBox");
-        box.select();
-        try{
-          await navigator.clipboard.writeText(shareUrl);
-          showToast("Link copied");
-        }catch(e){
-          showToast("Select all (already highlighted) and copy manually");
-        }
-      };
-      document.getElementById("ssDone").onclick = ()=> closeOverlay(overlay);
-    }
-  }
-
-  overlay.innerHTML = `<div class="modal-sheet"></div>`;
-  document.getElementById("app").appendChild(overlay);
-  overlay.addEventListener("click", e=>{ if(e.target===overlay && step!=="creating") closeOverlay(overlay); });
-  paint();
 }
 
 function openBackupModal(){
@@ -1621,9 +1549,9 @@ async function handleScorecardFile(file){
   }
 }
 
-function openModal(mode, prebuiltRound, fromScan){
+function openModal(mode, prebuiltRound, fromScan, standaloneCreate){
   const round = mode==="new" ? (prebuiltRound || newRound()) : getCurrentRound();
-  if(mode==="new"){
+  if(mode==="new" && !standaloneCreate){
     const order = seasonOrderedNames();
     if(order){
       round.players = round.players.map((name,i)=> (name && name!==("Player "+(i+1))) ? name : order[i]);
@@ -1662,13 +1590,18 @@ function openModal(mode, prebuiltRound, fromScan){
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-title">${mode==="new"?"New round":"Round settings"}</div>
+      <div class="modal-title">${standaloneCreate ? "Share a one-off round" : (mode==="new"?"New round":"Round settings")}</div>
+      ${standaloneCreate ? `<p style="font-size:12.5px; color:var(--ink-soft); margin:-6px 0 14px;">Set it up just like a normal round — course, par, yardage, players, scoring. It gets its own private link, never counts toward your league's season, and anyone you send it to only sees this one round.</p>` : ""}
       ${fromScan ? `<div class="scan-banner">${ICONS.camera}<span>Pre-filled from your photo — double-check the course, date, names, par, and yardage below, then check each hole's scores on the Scorecard tab once you start.</span></div>` : ""}
       ${mode!=="new" ? `<div class="season-toggle-row">
         <span style="font-size:13px; font-weight:600;">Lock this round</span>
         <div class="switch" id="lockToggle"><div class="knob"></div></div>
       </div>` : ""}
-      ${IS_STANDALONE ? "" : `<div class="season-toggle-row">
+      <div class="season-toggle-row">
+        <span style="font-size:13px; font-weight:600;">9-hole round <span style="color:var(--ink-soft); font-weight:500;">(half season points)</span></span>
+        <div class="switch ${round.roundLength===9?'on':''}" id="length9Toggle"><div class="knob"></div></div>
+      </div>
+      ${(IS_STANDALONE || standaloneCreate) ? "" : `<div class="season-toggle-row">
         <span style="font-size:13px; font-weight:600;">Don't count toward season standings</span>
         <div class="switch ${round.excludeFromSeason?'on':''}" id="excludeToggle"><div class="knob"></div></div>
       </div>`}
@@ -1684,25 +1617,29 @@ function openModal(mode, prebuiltRound, fromScan){
       ${playerRowsHTML(round)}
       <div class="section-gap"></div>
       <label class="field-label">Par &amp; yardage per hole</label>
-      ${parGridHTML(round)}
+      ${parGridHTML(round, 0, 9)}
+      <div id="backNineParWrap" style="${round.roundLength===9?'display:none;':''} margin-top:8px;">
+        <label class="field-label" style="margin:8px 0 6px;">Holes 10–18</label>
+        ${parGridHTML(round, 9, 18)}
+      </div>
       <div class="section-gap"></div>
       <label class="field-label">Wolf scoring (points per winning player)</label>
-      <div class="season-toggle-row">
+      <div id="scoringSplitRow" class="season-toggle-row" style="${round.roundLength===9?'display:none;':''}">
         <span style="font-size:13px; font-weight:600;">Different scoring for back 9</span>
         <div class="switch ${round.scoringSplit?'on':''}" id="splitToggle"><div class="knob"></div></div>
       </div>
       <div id="frontScoring">
-        <label class="field-label" id="frontScoringLbl" style="margin:2px 0 6px; ${round.scoringSplit?'':'display:none;'}">Front 9 (holes 1–9)</label>
+        <label class="field-label" id="frontScoringLbl" style="margin:2px 0 6px; ${(round.scoringSplit && round.roundLength!==9)?'':'display:none;'}">Front 9 (holes 1–9)</label>
         ${scoringRowsHTML(round,"front")}
       </div>
-      <div id="backScoringWrap" style="${round.scoringSplit?'':'display:none;'} margin-top:8px;">
+      <div id="backScoringWrap" style="${(round.scoringSplit && round.roundLength!==9)?'':'display:none;'} margin-top:8px;">
         <label class="field-label" style="margin:2px 0 6px;">Back 9 (holes 10–18)</label>
         ${scoringRowsHTML(round,"back")}
       </div>
       <div style="display:flex; gap:10px; margin-top:16px;">
         <button class="btn btn-ghost" id="mCancel" style="flex:1;">Cancel</button>
         ${mode!=="new" ? `<button class="btn btn-danger-ghost" id="mDelete" style="flex:1;">${ICONS.trash} Delete</button>` : ""}
-        <button class="btn btn-primary" id="mSave" style="flex:1.4;">${mode==="new"?"Start round":"Save"}</button>
+        <button class="btn btn-primary" id="mSave" style="flex:1.4;">${standaloneCreate ? "Create &amp; get link" : (mode==="new"?"Start round":"Save")}</button>
       </div>
     </div>`;
   document.getElementById("app").appendChild(overlay);
@@ -1722,18 +1659,41 @@ function openModal(mode, prebuiltRound, fromScan){
   }
 
   const splitToggle = document.getElementById("splitToggle");
-  splitToggle.onclick = ()=>{
-    round.scoringSplit = !round.scoringSplit;
-    splitToggle.classList.toggle("on", round.scoringSplit);
-    document.getElementById("backScoringWrap").style.display = round.scoringSplit ? "" : "none";
-    document.getElementById("frontScoringLbl").style.display = round.scoringSplit ? "" : "none";
-  };
+  if(splitToggle){
+    splitToggle.onclick = ()=>{
+      round.scoringSplit = !round.scoringSplit;
+      splitToggle.classList.toggle("on", round.scoringSplit);
+      document.getElementById("backScoringWrap").style.display = round.scoringSplit ? "" : "none";
+      document.getElementById("frontScoringLbl").style.display = round.scoringSplit ? "" : "none";
+    };
+  }
 
   const excludeToggle = document.getElementById("excludeToggle");
   if(excludeToggle){
     excludeToggle.onclick = ()=>{
       round.excludeFromSeason = !round.excludeFromSeason;
       excludeToggle.classList.toggle("on", round.excludeFromSeason);
+    };
+  }
+
+  const length9Toggle = document.getElementById("length9Toggle");
+  if(length9Toggle){
+    length9Toggle.onclick = ()=>{
+      round.roundLength = round.roundLength===9 ? 18 : 9;
+      length9Toggle.classList.toggle("on", round.roundLength===9);
+      const is9 = round.roundLength===9;
+      document.getElementById("backNineParWrap").style.display = is9 ? "none" : "";
+      const splitRow = document.getElementById("scoringSplitRow");
+      if(splitRow) splitRow.style.display = is9 ? "none" : "";
+      const backScoringWrap = document.getElementById("backScoringWrap");
+      const frontScoringLbl = document.getElementById("frontScoringLbl");
+      if(is9){
+        backScoringWrap.style.display = "none";
+        frontScoringLbl.style.display = "none";
+      } else {
+        backScoringWrap.style.display = round.scoringSplit ? "" : "none";
+        frontScoringLbl.style.display = round.scoringSplit ? "" : "none";
+      }
     };
   }
 
@@ -1749,7 +1709,7 @@ function openModal(mode, prebuiltRound, fromScan){
     });
   }
 
-  document.getElementById("mSave").onclick = ()=>{
+  document.getElementById("mSave").onclick = async ()=>{
     round.course = document.getElementById("mCourse").value.trim();
     round.date = document.getElementById("mDate").value || todayISO();
     overlay.querySelectorAll(".player-name-input").forEach(inp=>{
@@ -1782,10 +1742,47 @@ function openModal(mode, prebuiltRound, fromScan){
       round.scoring.back = JSON.parse(JSON.stringify(round.scoring.front));
     }
 
+    if(standaloneCreate){
+      round.excludeFromSeason = true;
+      const sheet = overlay.querySelector(".modal-sheet");
+      sheet.innerHTML = `
+        <div class="modal-handle"></div>
+        <div style="text-align:center; padding:30px 0 20px;">
+          <div class="spinner"></div>
+          <div style="font-family:'IBM Plex Mono',monospace; font-weight:700; color:var(--fairway); font-size:13.5px;">Creating your link…</div>
+        </div>`;
+      try{
+        const { db, doc, setDoc } = await loadFirebaseSdk();
+        const ref = doc(db, STANDALONE_COLLECTION, round.id);
+        await setDoc(ref, { payload: JSON.stringify({rounds:{[round.id]:round}, roundOrder:[round.id]}), updatedAt: Date.now() });
+        const shareUrl = location.origin + location.pathname + "?round=" + round.id;
+        sheet.innerHTML = `
+          <div class="modal-handle"></div>
+          <div class="modal-title">Your link is ready</div>
+          <p style="font-size:12.5px; color:var(--ink-soft); margin:-6px 0 14px;">Send this to anyone — they can open it and use this round without seeing your league.</p>
+          <textarea class="backup-textarea" id="ssLinkBox" readonly style="min-height:60px;">${escapeHTML(shareUrl)}</textarea>
+          <button class="btn btn-primary btn-block" id="ssCopy" style="margin-top:10px;">Copy link</button>
+          <button class="btn btn-ghost btn-block" id="ssDone" style="margin-top:10px;">Done</button>`;
+        document.getElementById("ssCopy").onclick = async ()=>{
+          const box = document.getElementById("ssLinkBox");
+          box.select();
+          try{ await navigator.clipboard.writeText(shareUrl); showToast("Link copied"); }
+          catch(e){ showToast("Select all (already highlighted) and copy manually"); }
+        };
+        document.getElementById("ssDone").onclick = ()=> closeOverlay(overlay);
+      }catch(e){
+        console.error("failed to create standalone round", e);
+        closeOverlay(overlay);
+        showToast("Couldn't create the link — check your connection and try again");
+      }
+      return;
+    }
+
     rounds[round.id] = round;
     if(!roundOrder.includes(round.id)) roundOrder.unshift(round.id);
     currentRoundId = round.id;
     if(mode==="new"){ activeTab = "card"; currentHole = 0; }
+    else if(round.roundLength===9 && currentHole>8){ currentHole = 8; }
     saveState();
     closeOverlay(overlay);
     render();
@@ -1838,6 +1835,10 @@ function openHistoricalModal(mode){
         <span style="font-size:13px; font-weight:600;">Lock this round</span>
         <div class="switch" id="hLockToggle"><div class="knob"></div></div>
       </div>` : ""}
+      <div class="season-toggle-row">
+        <span style="font-size:13px; font-weight:600;">9-hole round <span style="color:var(--ink-soft); font-weight:500;">(half season points)</span></span>
+        <div class="switch ${round.roundLength===9?'on':''}" id="hLength9Toggle"><div class="knob"></div></div>
+      </div>
       <div class="season-toggle-row">
         <span style="font-size:13px; font-weight:600;">Don't count toward season standings</span>
         <div class="switch ${round.excludeFromSeason?'on':''}" id="hExcludeToggle"><div class="knob"></div></div>
@@ -1894,6 +1895,12 @@ function openHistoricalModal(mode){
   hExcludeToggle.onclick = ()=>{
     round.excludeFromSeason = !round.excludeFromSeason;
     hExcludeToggle.classList.toggle("on", round.excludeFromSeason);
+  };
+
+  const hLength9Toggle = document.getElementById("hLength9Toggle");
+  hLength9Toggle.onclick = ()=>{
+    round.roundLength = round.roundLength===9 ? 18 : 9;
+    hLength9Toggle.classList.toggle("on", round.roundLength===9);
   };
 
   if(mode!=="new"){
@@ -2044,7 +2051,7 @@ function attachHandlers(){
   if(btnCreateHistorical) btnCreateHistorical.onclick = ()=> openHistoricalModal("new");
 
   const btnShareStandalone = document.getElementById("btnShareStandalone");
-  if(btnShareStandalone) btnShareStandalone.onclick = ()=> openShareStandaloneModal();
+  if(btnShareStandalone) btnShareStandalone.onclick = ()=> openModal("new", newRound(), false, true);
 
   const btnBackup = document.getElementById("btnBackup");
   if(btnBackup) btnBackup.onclick = ()=> openBackupModal();
@@ -2103,10 +2110,55 @@ function attachHandlers(){
   const btnPrev = document.getElementById("btnPrevHole");
   if(btnPrev) btnPrev.onclick = ()=>{ if(currentHole>0){ currentHole--; render(); } };
   const btnNext = document.getElementById("btnNextHole");
-  if(btnNext) btnNext.onclick = ()=>{ if(currentHole<17){ currentHole++; render(); } };
+  if(btnNext) btnNext.onclick = ()=>{ const max=(round.roundLength===9?9:18); if(currentHole<max-1){ currentHole++; render(); } };
 
   const btnHolePicker = document.getElementById("btnHolePicker");
   if(btnHolePicker) btnHolePicker.onclick = ()=> openHolePicker(round);
+
+  const btnParDec = document.querySelector("[data-par-dec]");
+  if(btnParDec) btnParDec.onclick = ()=>{
+    if(round.locked){ showToast("Round is locked"); return; }
+    round.pars[currentHole] = Math.max(3, round.pars[currentHole]-1);
+    saveState(); render();
+  };
+  const btnParInc = document.querySelector("[data-par-inc]");
+  if(btnParInc) btnParInc.onclick = ()=>{
+    if(round.locked){ showToast("Round is locked"); return; }
+    round.pars[currentHole] = Math.min(6, round.pars[currentHole]+1);
+    saveState(); render();
+  };
+
+  const btnYdDec = document.querySelector("[data-yd-dec]");
+  if(btnYdDec) btnYdDec.onclick = ()=>{
+    if(round.locked){ showToast("Round is locked"); return; }
+    if(!round.yardages) round.yardages = Array(18).fill(null);
+    const cur = round.yardages[currentHole];
+    const curVal = (cur===null || cur===undefined || cur==="") ? 0 : Number(cur);
+    const next = Math.max(0, curVal-10);
+    round.yardages[currentHole] = next===0 ? null : next;
+    saveState(); render();
+  };
+  const btnYdInc = document.querySelector("[data-yd-inc]");
+  if(btnYdInc) btnYdInc.onclick = ()=>{
+    if(round.locked){ showToast("Round is locked"); return; }
+    if(!round.yardages) round.yardages = Array(18).fill(null);
+    const cur = round.yardages[currentHole];
+    const curVal = (cur===null || cur===undefined || cur==="") ? 0 : Number(cur);
+    round.yardages[currentHole] = Math.min(700, curVal+10);
+    saveState(); render();
+  };
+
+  const ydDirectInput = document.getElementById("ydDirectInput");
+  if(ydDirectInput){
+    ydDirectInput.onchange = ()=>{
+      if(round.locked) return;
+      if(!round.yardages) round.yardages = Array(18).fill(null);
+      const raw = ydDirectInput.value.trim();
+      const n = parseInt(raw,10);
+      round.yardages[currentHole] = (raw==="" || isNaN(n)) ? null : Math.max(0, Math.min(700, n));
+      saveState(); render();
+    };
+  }
 
   document.querySelectorAll("[data-goto-hole]").forEach(el=>{
     el.onclick = ()=>{ currentHole = parseInt(el.dataset.gotoHole,10); render(); };
